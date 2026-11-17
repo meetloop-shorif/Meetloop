@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Meetloop</title>
+<style>
+:root{--bg:#F5F3FC;--card:#FFFFFF;--ink:#211A3E;--muted:#6B6585;--line:#E5E0F3;--accent:#5B3DF5;--danger:#D6455D}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans Bengali",system-ui,sans-serif;font-size:17px;line-height:1.6}
+.wrap{max-width:620px;margin:0 auto;padding:20px 16px 48px}
+h1{margin:0 0 16px;font-size:28px;color:var(--accent)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:12px}
+button{background:var(--accent);color:#fff;border:0;border-radius:999px;padding:10px 20px;font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:none;color:var(--accent);padding:6px 0}
+button:disabled{opacity:.5;cursor:not-allowed}
+textarea{width:100%;min-height:84px;border:1.5px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;background:var(--bg);color:var(--ink);resize:vertical;box-sizing:border-box}
+textarea:focus{outline:none;border-color:var(--accent)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px}
+.who{font-weight:700}
+.muted{color:var(--muted);font-size:14px}
+.text{white-space:pre-wrap;margin:10px 0;overflow-wrap:anywhere}
+.del{color:var(--danger);font-size:14px;margin-left:auto}
+.msg{color:var(--danger);min-height:1.4em}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>Meetloop</h1>
+  <section id="login" class="card" hidden>
+    <p>শুরু করতে আপনার গুগল অ্যাকাউন্ট দিয়ে সাইন ইন করুন।</p>
+    <button id="signin">Google দিয়ে সাইন ইন</button>
+    <p class="msg" id="loginErr"></p>
+  </section>
+  <section id="app" hidden>
+    <div class="card">
+      <textarea id="text" maxlength="1000" placeholder="মনের কথা লিখুন…"></textarea>
+      <div class="row">
+        <span class="muted" id="me"></span>
+        <button id="post">পোস্ট করুন</button>
+      </div>
+      <p class="msg" id="postErr"></p>
+    </div>
+    <div id="feed"></div>
+    <p><button class="ghost" id="signout">সাইন আউট</button></p>
+  </section>
+</main>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, deleteDoc, doc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDP8JwbNXmP6VMD6IpHSdUqOtJLo9ZT_RI",
+  authDomain: "meetloop-2027.firebaseapp.com",
+  projectId: "meetloop-2027",
+  storageBucket: "meetloop-2027.firebasestorage.app",
+  messagingSenderId: "897370026624",
+  appId: "1:897370026624:web:069dfa8057bfbcdd376c65",
+  measurementId: "G-TBEQXJSED5"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const $ = (id) => document.getElementById(id);
+let unsubFeed = null;
+
+$("signin").onclick = async () => {
+  $("loginErr").textContent = "";
+  try {
+    await signInWithPopup(auth, new GoogleAuthProvider());
+  } catch (e) {
+    $("loginErr").textContent = "সাইন ইন হয়নি। আবার চেষ্টা করুন।";
+  }
+};
+$("signout").onclick = () => signOut(auth);
+
+$("post").onclick = async () => {
+  const text = $("text").value.trim();
+  $("postErr").textContent = "";
+  if (!text) { $("postErr").textContent = "পোস্টে কিছু লিখুন।"; return; }
+  $("post").disabled = true;
+  try {
+    await addDoc(collection(db, "posts"), {
+      text,
+      uid: auth.currentUser.uid,
+      name: auth.currentUser.displayName || "ব্যবহারকারী",
+      createdAt: serverTimestamp()
+    });
+    $("text").value = "";
+  } catch (e) {
+    $("postErr").textContent = "পোস্ট করা যায়নি। ইন্টারনেট ও অনুমতি দেখুন।";
+  } finally {
+    $("post").disabled = false;
+  }
+};
+
+function renderFeed(snapshot) {
+  const feed = $("feed");
+  feed.replaceChildren();
+  if (snapshot.empty) {
+    const p = document.createElement("p");
+    p.className = "muted";
+    p.textContent = "এখনো কোনো পোস্ট নেই। প্রথম পোস্টটি আপনিই করুন।";
+    feed.appendChild(p);
+    return;
+  }
+  snapshot.forEach((d) => {
+    const p = d.data();
+    const card = document.createElement("article");
+    card.className = "card";
+    const who = document.createElement("div");
+    who.className = "who";
+    who.textContent = p.name || "ব্যবহারকারী";
+    const body = document.createElement("div");
+    body.className = "text";
+    body.textContent = p.text;
+    card.append(who, body);
+    if (auth.currentUser && p.uid === auth.currentUser.uid) {
+      const del = document.createElement("button");
+      del.className = "ghost del";
+      del.textContent = "মুছুন";
+      del.onclick = () => {
+        if (confirm("পোস্টটি মুছে ফেলবেন?")) deleteDoc(doc(db, "posts", d.id));
+      };
+      card.appendChild(del);
+    }
+    feed.appendChild(card);
+  });
+}
+
+onAuthStateChanged(auth, (user) => {
+  if (unsubFeed) { unsubFeed(); unsubFeed = null; }
+  $("login").hidden = !!user;
+  $("app").hidden = !user;
+  if (user) {
+    $("me").textContent = user.displayName + " হিসেবে লিখছেন";
+    const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
+    unsubFeed = onSnapshot(q, renderFeed, () => {
+      $("feed").textContent = "পোস্ট লোড হয়নি। ডেটাবেসের নিয়ম দেখুন।";
+    });
+  }
+});
+</script>
+</body>
+</html>
